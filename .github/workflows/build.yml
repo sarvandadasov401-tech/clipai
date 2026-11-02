@@ -1,0 +1,69 @@
+
+name: Build CLIPAI APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['CLIPAI.zip']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack CLIPAI project
+        run: |
+          if [ -f CLIPAI.zip ]; then
+            unzip -o -q CLIPAI.zip -x ".github/*"
+            rm CLIPAI.zip
+            git config user.name "clipai-bot"
+            git config user.email "clipai-bot@users.noreply.github.com"
+            git add -A
+            git commit -m "Unpack CLIPAI project" || true
+            git push
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install app dependencies
+        working-directory: mobile
+        run: |
+          npm install --no-audit --no-fund
+          npx expo install --fix
+
+      - name: Set version code
+        working-directory: mobile
+        run: |
+          jq ".expo.android.versionCode = ${{ github.run_number }}" app.json > app.tmp
+          mv app.tmp app.json
+
+      - name: Generate Android project
+        working-directory: mobile
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Publish APK as a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: CLIPAI APK (build ${{ github.run_number }})
+          files: mobile/android/app/build/outputs/apk/release/app-release.apk
